@@ -28,89 +28,64 @@
             height: 100vh;
         }
 
-        #ui-overlay {
+        /* Highscore oben links */
+        #highscore-badge {
             position: absolute;
             top: 20px;
             left: 20px;
             pointer-events: none;
-            background: rgba(15, 23, 42, 0.85);
-            padding: 15px 22px;
-            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.75);
+            padding: 8px 16px;
+            border-radius: 10px;
             border: 1px solid rgba(255, 255, 255, 0.12);
             backdrop-filter: blur(8px);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
-        }
-
-        h1 {
-            font-size: 1.1rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            font-size: 0.95rem;
+            color: #94a3b8;
             font-weight: 600;
-            margin-bottom: 8px;
-            color: #38bdf8;
             letter-spacing: 0.5px;
         }
 
-        .stat-line {
-            font-size: 0.9rem;
-            margin: 4px 0;
-            color: #94a3b8;
-            display: flex;
-            gap: 12px;
-            justify-content: space-between;
-        }
-
-        .stat-value {
-            color: #f8fafc;
-            font-weight: bold;
-            font-family: monospace;
-        }
-
-        .instruction {
-            margin-top: 10px;
-            font-size: 0.8rem;
-            color: #64748b;
-        }
-
-        .active-state {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-
-        .state-up { background-color: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
-        .state-down { background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
-        .state-touching { background-color: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
-        .state-dead { background-color: rgba(239, 68, 68, 0.3); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.6); }
-
-        .speed-badge {
+        #highscore-badge span {
             color: #38bdf8;
-            font-weight: bold;
             font-family: monospace;
+            font-weight: bold;
+        }
+
+        /* Meteranzeige oben Mitte */
+        #distance-hud {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+            font-size: 2.8rem;
+            font-weight: 800;
+            font-family: monospace;
+            color: #f8fafc;
+            text-shadow: 0 4px 15px rgba(0, 0, 0, 0.6), 0 0 10px rgba(56, 189, 248, 0.3);
+            letter-spacing: 1px;
+        }
+
+        /* Kleine Einheiten-Anzeige unter den Metern */
+        #distance-unit {
+            font-size: 1.1rem;
+            color: #38bdf8;
+            font-weight: 600;
+            margin-left: 4px;
         }
     </style>
 </head>
 <body>
 
-    <div id="ui-overlay">
-        <h1>Infinite Corridor</h1>
-        <div class="stat-line">
-            Status: <span id="status-badge" class="active-state state-down">Sinken (-44.9°)</span>
-        </div>
-        <div class="stat-line">
-            Strecke: <span id="distance-display" class="stat-value">0 m</span>
-        </div>
-        <div class="stat-line">
-            Highscore: <span id="highscore-display" class="stat-value">0 m</span>
-        </div>
-        <div class="stat-line">
-            Geschwindigkeit: <span id="speed-display" class="speed-badge">x0.807</span>
-        </div>
-        <div class="instruction">
-            Gedrückt halten: <b>Steigen (45,1°)</b><br>
-            Loslassen: <b>Sinken (44,9°)</b><br>
-            <i>[Leertaste, Linksklick oder Touch]</i>
-        </div>
+    <!-- Highscore oben links -->
+    <div id="highscore-badge">
+        Highscore: <span id="highscore-display">0</span> Meter
+    </div>
+
+    <!-- Große Meteranzeige oben Mitte -->
+    <div id="distance-hud">
+        <span id="distance-display">0</span><span id="distance-unit">m</span>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -119,15 +94,16 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        const statusBadge = document.getElementById('status-badge');
         const distanceDisplay = document.getElementById('distance-display');
         const highscoreDisplay = document.getElementById('highscore-display');
-        const speedDisplay = document.getElementById('speed-display');
 
-        // Spielfeld-Spezifikation (10 spielbare Blöcke)
-        const PLAYABLE_BLOCKS_HIGH = 10;
+        // Spielfeld-Spezifikation (11 spielbare Blöcke hoch)
+        const PLAYABLE_BLOCKS_HIGH = 11;
         const MARGIN_BLOCKS = 0.5; 
         const TOTAL_BLOCKS_HIGH = PLAYABLE_BLOCKS_HIGH + (MARGIN_BLOCKS * 2);
+
+        // Startabstand vor dem ersten Korridor-Teil
+        const START_FREE_BLOCKS = 20;
 
         let BLOCK_SIZE = window.innerHeight / TOTAL_BLOCKS_HIGH;
         let BOUNDARY_PADDING = BLOCK_SIZE * MARGIN_BLOCKS;
@@ -152,7 +128,7 @@
         const PLAYER_HITBOX_BLOCKS = 0.17;
 
         let highscore = parseInt(localStorage.getItem('side_scroller_highscore') || '0', 10);
-        highscoreDisplay.textContent = `${highscore} m`;
+        highscoreDisplay.textContent = highscore;
 
         const player = {
             x: 0,
@@ -176,8 +152,8 @@
         let levelObjects = [];
         let speedPortals = [];
         let generatedGridX = 0;
-        let corridorDirection = -1; // -1 = Sinken (DOWN-RIGHT), 1 = Steigen (UP-RIGHT)
-        let currentY = 4;           // Oberer Schwellenwert der Korridoröffnung
+        let corridorDirection = -1; // -1 = Sinken, 1 = Steigen
+        let currentY = 4;           // Y-Position der Korridordecke
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
@@ -194,13 +170,13 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // --- PROZEDURALE GENERIERUNG (NAHTLOSER 45° KORRIDOR) ---
+        // --- PROZEDURALE GENERIERUNG ---
 
         function initGenerator() {
             levelObjects = [];
             speedPortals = [];
             generatedGridX = 0;
-            corridorDirection = -1; // Startet sinkend
+            corridorDirection = -1;
             currentY = 4;
 
             for (let i = 0; i < SPEED_STAGES.length; i++) {
@@ -215,18 +191,26 @@
         }
 
         function generateCorridorAhead(targetGridX) {
+            const minY = 0;
+            const maxY = PLAYABLE_BLOCKS_HIGH - 3;
+
             while (generatedGridX < targetGridX) {
                 const gx = generatedGridX;
 
+                if (gx < START_FREE_BLOCKS) {
+                    generatedGridX++;
+                    continue;
+                }
+
                 // Richtungswechsel-Logik
                 let changeDirection = false;
-                if (gx > 8) {
-                    if (corridorDirection === 1 && currentY <= 0) {
-                        changeDirection = true; // Decke erreicht -> 100% Drehung nach unten
-                    } else if (corridorDirection === -1 && currentY >= PLAYABLE_BLOCKS_HIGH - 2) {
-                        changeDirection = true; // Boden erreicht -> 100% Drehung nach oben
+                if (gx > START_FREE_BLOCKS + 4) {
+                    if (corridorDirection === 1 && currentY <= minY) {
+                        changeDirection = true;
+                    } else if (corridorDirection === -1 && currentY >= maxY) {
+                        changeDirection = true;
                     } else if (Math.random() < 0.25) {
-                        changeDirection = true; // 25% Chance im freien Raum
+                        changeDirection = true;
                     }
                 }
 
@@ -234,40 +218,39 @@
                     corridorDirection *= -1;
                 }
 
-                // Slopes & Wände platzieren
+                if (currentY <= minY && corridorDirection === 1) {
+                    corridorDirection = -1;
+                } else if (currentY >= maxY && corridorDirection === -1) {
+                    corridorDirection = 1;
+                }
+
                 if (corridorDirection === 1) {
                     // Steigender Korridor (UP-RIGHT)
-                    // Decken-Slope (Rot 270)
-                    levelObjects.push({ gridX: gx, gridY: currentY, type: 'slope', rotation: 270 });
-                    // Boden-Slope (Rot 0)
-                    levelObjects.push({ gridX: gx, gridY: currentY + 1, type: 'slope', rotation: 0 });
+                    const upY = currentY - 1;
 
-                    // Ober- und Unterhalb vollständig ausfüllen
-                    for (let y = 0; y < currentY; y++) {
+                    levelObjects.push({ gridX: gx, gridY: upY, type: 'slope', rotation: 270 });
+                    levelObjects.push({ gridX: gx, gridY: upY + 2, type: 'slope', rotation: 0 });
+
+                    for (let y = 0; y < upY; y++) {
                         levelObjects.push({ gridX: gx, gridY: y, type: 'block' });
                     }
-                    for (let y = currentY + 2; y < PLAYABLE_BLOCKS_HIGH; y++) {
+                    for (let y = upY + 3; y < PLAYABLE_BLOCKS_HIGH; y++) {
                         levelObjects.push({ gridX: gx, gridY: y, type: 'block' });
                     }
 
-                    // Nächster Schritt nach oben (-Y)
                     currentY -= 1;
                 } else {
                     // Sinkender Korridor (DOWN-RIGHT)
-                    // Decken-Slope (Rot 90)
                     levelObjects.push({ gridX: gx, gridY: currentY, type: 'slope', rotation: 90 });
-                    // Boden-Slope (Rot 180)
-                    levelObjects.push({ gridX: gx, gridY: currentY + 1, type: 'slope', rotation: 180 });
+                    levelObjects.push({ gridX: gx, gridY: currentY + 2, type: 'slope', rotation: 180 });
 
-                    // Ober- und Unterhalb vollständig ausfüllen
                     for (let y = 0; y < currentY; y++) {
                         levelObjects.push({ gridX: gx, gridY: y, type: 'block' });
                     }
-                    for (let y = currentY + 2; y < PLAYABLE_BLOCKS_HIGH; y++) {
+                    for (let y = currentY + 3; y < PLAYABLE_BLOCKS_HIGH; y++) {
                         levelObjects.push({ gridX: gx, gridY: y, type: 'block' });
                     }
 
-                    // Nächster Schritt nach unten (+Y)
                     currentY += 1;
                 }
 
@@ -307,11 +290,6 @@
             player.isSlidingOnSlope = false;
             particles = [];
             isHolding = false;
-
-            statusBadge.textContent = `Sinken (-44.9°)`;
-            statusBadge.className = 'active-state state-down';
-            speedDisplay.textContent = SPEED_STAGES[0].label;
-            speedDisplay.style.color = SPEED_STAGES[0].color;
 
             initGenerator();
         }
@@ -420,15 +398,13 @@
                     if (polygonsIntersect(playerPoly, slopePoly)) {
                         const rot = (obj.rotation || 0) % 360;
 
-                        // Universelle Gleitprüfung für 45° Slopes
                         if ((rot === 0 || rot === 270) && isHolding) {
                             player.isSlidingOnSlope = true;
-                            player.slideAngleRad = -Math.PI / 4; // Steigen
+                            player.slideAngleRad = -Math.PI / 4;
                         } else if ((rot === 180 || rot === 90) && !isHolding) {
                             player.isSlidingOnSlope = true;
-                            player.slideAngleRad = Math.PI / 4;  // Sinken
+                            player.slideAngleRad = Math.PI / 4;
                         } else {
-                            // Stumpfer Frontalaufprall -> Tod
                             killPlayer();
                             return;
                         }
@@ -445,9 +421,6 @@
                     portal.passed = true;
                     player.speedMultiplier = portal.stage.multiplier;
                     player.speed = BASE_BLOCKS_PER_SECOND * player.speedMultiplier * BLOCK_SIZE;
-                    
-                    speedDisplay.textContent = portal.stage.label;
-                    speedDisplay.style.color = portal.stage.color;
 
                     for (let i = 0; i < 20; i++) {
                         particles.push({
@@ -467,14 +440,12 @@
         function killPlayer() {
             player.alive = false;
             player.respawnTimer = 1.0;
-            statusBadge.textContent = 'ZERSTÖRT!';
-            statusBadge.className = 'active-state state-dead';
 
             const finalMeters = Math.floor(player.x / BLOCK_SIZE);
             if (finalMeters > highscore) {
                 highscore = finalMeters;
                 localStorage.setItem('side_scroller_highscore', highscore.toString());
-                highscoreDisplay.textContent = `${highscore} m`;
+                highscoreDisplay.textContent = highscore;
             }
 
             for (let i = 0; i < 35; i++) {
@@ -502,11 +473,9 @@
                 const floorY = canvas.height - BOUNDARY_PADDING - player.radius;
 
                 let currentRad = isHolding ? -ANGLE_UP_RAD : ANGLE_DOWN_RAD;
-                let isTouchingWall = false;
 
                 if (player.isSlidingOnSlope) {
                     currentRad = player.slideAngleRad;
-                    isTouchingWall = true;
                 }
 
                 let dx = Math.cos(currentRad) * player.speed * deltaTime;
@@ -518,12 +487,10 @@
                     player.y = ceilingY;
                     dy = 0;
                     currentRad = 0; 
-                    isTouchingWall = true;
                 } else if (nextY >= floorY) {
                     player.y = floorY;
                     dy = 0;
                     currentRad = 0;
-                    isTouchingWall = true;
                 } else {
                     player.y = nextY;
                 }
@@ -536,11 +503,9 @@
                     player.trail.shift();
                 }
 
-                // Generierung voraus treiben
                 const currentGridX = Math.floor(player.x / BLOCK_SIZE);
                 generateCorridorAhead(currentGridX + 60);
 
-                // Vergangene Blöcke bereinigen
                 levelObjects = levelObjects.filter(obj => obj.gridX > currentGridX - 20);
 
                 checkCollisions();
@@ -548,22 +513,11 @@
 
                 cameraX = Math.max(0, player.x - canvas.width * 0.25);
 
-                if (isTouchingWall && player.alive) {
-                    statusBadge.textContent = `Gleiten`;
-                    statusBadge.className = 'active-state state-touching';
-                } else if (isHolding && player.alive) {
-                    statusBadge.textContent = `Steigen (+${ANGLE_UP_DEG.toFixed(1)}°)`;
-                    statusBadge.className = 'active-state state-up';
-                } else if (player.alive) {
-                    statusBadge.textContent = `Sinken (-${ANGLE_DOWN_DEG.toFixed(1)}°)`;
-                    statusBadge.className = 'active-state state-down';
-                }
-
                 const distanceMeters = Math.floor(player.x / BLOCK_SIZE);
-                distanceDisplay.textContent = `${distanceMeters} m`;
+                distanceDisplay.textContent = distanceMeters;
                 
                 if (distanceMeters > highscore) {
-                    highscoreDisplay.textContent = `${distanceMeters} m`;
+                    highscoreDisplay.textContent = distanceMeters;
                 }
             } else {
                 player.respawnTimer -= deltaTime;
@@ -669,7 +623,6 @@
                 }
             }
 
-            // Speed Portale zeichnen
             for (const portal of speedPortals) {
                 const screenX = (portal.gridX * BLOCK_SIZE) - cameraX;
                 if (screenX > -BLOCK_SIZE && screenX < canvas.width) {
