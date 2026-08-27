@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lucide Icon Downloader</title>
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+
+  <h1>Lucide Icon Downloader</h1>
+
+  <p>Lucide Icon auswählen, Hex-Farbe eingeben und als SVG herunterladen.</p>
+
+  <label for="iconName">Icon:</label>
+  <input
+    id="iconName"
+    list="iconList"
+    value="heart"
+    placeholder="z. B. heart, star, camera"
+  >
+
+  <datalist id="iconList"></datalist>
+
+  <br><br>
+
+  <label for="hexColor">Hex-Farbe:</label>
+  <input id="hexColor" type="text" value="#7c3aed" maxlength="7">
+
+  <input id="colorPicker" type="color" value="#7c3aed">
+
+  <br><br>
+
+  <h2>Vorschau</h2>
+
+  <div id="iconPreview"></div>
+
+  <br>
+
+  <button id="downloadBtn">SVG herunterladen</button>
+  <button id="copyBtn">SVG kopieren</button>
+
+  <script>
+    const iconName = document.getElementById("iconName");
+    const iconList = document.getElementById("iconList");
+    const hexColor = document.getElementById("hexColor");
+    const colorPicker = document.getElementById("colorPicker");
+    const preview = document.getElementById("iconPreview");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const copyBtn = document.getElementById("copyBtn");
+
+    function normalizeHex(value) {
+      let hex = value.trim();
+
+      if (!hex.startsWith("#")) {
+        hex = "#" + hex;
+      }
+
+      if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+        return hex;
+      }
+
+      return null;
+    }
+
+    function camelToKebab(name) {
+      return name
+        .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+        .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
+        .toLowerCase();
+    }
+
+    function populateIconList() {
+      const icons = lucide.icons || {};
+      const names = [...new Set(
+        Object.keys(icons).map(camelToKebab)
+      )].sort();
+
+      iconList.innerHTML = "";
+
+      names.forEach(name => {
+        const option = document.createElement("option");
+        option.value = name;
+        iconList.appendChild(option);
+      });
+    }
+
+    function renderIcon() {
+      const name = iconName.value.trim() || "heart";
+      const color = normalizeHex(hexColor.value) || "#7c3aed";
+
+      preview.innerHTML = `
+        <i
+          data-lucide="${name}"
+          width="128"
+          height="128"
+          stroke="${color}">
+        </i>
+      `;
+
+      try {
+        lucide.createIcons();
+      } catch (error) {
+        preview.textContent = "Icon nicht gefunden.";
+      }
+    }
+
+    function getSvgString() {
+      const svg = preview.querySelector("svg");
+
+      if (!svg) {
+        return null;
+      }
+
+      const color = normalizeHex(hexColor.value) || "#000000";
+      const clone = svg.cloneNode(true);
+
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("stroke", color);
+      clone.setAttribute("width", "24");
+      clone.setAttribute("height", "24");
+
+      return new XMLSerializer().serializeToString(clone);
+    }
+
+    iconName.addEventListener("input", renderIcon);
+
+    hexColor.addEventListener("input", () => {
+      const color = normalizeHex(hexColor.value);
+
+      if (color) {
+        colorPicker.value = color;
+        renderIcon();
+      }
+    });
+
+    colorPicker.addEventListener("input", () => {
+      hexColor.value = colorPicker.value;
+      renderIcon();
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      const svgString = getSvgString();
+
+      if (!svgString) {
+        alert("Bitte ein gültiges Icon auswählen.");
+        return;
+      }
+
+      const blob = new Blob(
+        [svgString],
+        { type: "image/svg+xml" }
+      );
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      const color = normalizeHex(hexColor.value) || "#000000";
+
+      link.href = url;
+      link.download =
+        `${iconName.value.trim() || "icon"}-${color.replace("#", "")}.svg`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      URL.revokeObjectURL(url);
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      const svgString = getSvgString();
+
+      if (!svgString) {
+        alert("Bitte ein gültiges Icon auswählen.");
+        return;
+      }
+
+      await navigator.clipboard.writeText(svgString);
+
+      alert("SVG wurde kopiert.");
+    });
+
+    populateIconList();
+    renderIcon();
+  </script>
+
+</body>
+</html>
