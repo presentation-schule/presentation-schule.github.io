@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Side-Scroller Level</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0b0f19;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ffffff;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+            background: rgba(15, 23, 42, 0.75);
+            padding: 15px 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        h1 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #38bdf8;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-line {
+            font-size: 0.9rem;
+            margin: 4px 0;
+            color: #94a3b8;
+            display: flex;
+            gap: 12px;
+        }
+
+        .stat-value {
+            color: #f8fafc;
+            font-weight: bold;
+            font-family: monospace;
+        }
+
+        .highscore-value {
+            color: #facc15;
+            font-weight: bold;
+            font-family: monospace;
+        }
+
+        .speed-badge {
+            background-color: rgba(56, 189, 248, 0.2);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.85rem;
+        }
+
+        .instruction {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+
+        .active-state {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .state-up {
+            background-color: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+
+        .state-down {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        .state-touching {
+            background-color: rgba(234, 179, 8, 0.2);
+            color: #facc15;
+            border: 1px solid rgba(234, 179, 8, 0.4);
+        }
+
+        .state-dead {
+            background-color: rgba(239, 68, 68, 0.3);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.6);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-overlay">
+        <h1>Prozeduraler Flug-Runner</h1>
+        <div class="stat-line">
+            Status: <span id="status-badge" class="active-state state-down">Sinken (-44.9°)</span>
+        </div>
+        <div class="stat-line">
+            Tempo: <span id="speed-badge" class="speed-badge">x0.807 Speed</span>
+        </div>
+        <div class="stat-line">
+            Distanz: <span id="distance-display" class="stat-value">0 m</span>
+        </div>
+        <div class="stat-line">
+            Highscore: <span id="highscore-display" class="highscore-value">0 m</span>
+        </div>
+        <div class="instruction">
+            Gedrückt halten: <b>Steigen (45,1°)</b><br>
+            Loslassen: <b>Sinken (44,9°)</b><br>
+            <i>[Leertaste, Linksklick oder Touch]</i>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI-Elemente
+        const statusBadge = document.getElementById('status-badge');
+        const speedBadge = document.getElementById('speed-badge');
+        const altitudeDisplay = document.getElementById('altitude-display');
+        const distanceDisplay = document.getElementById('distance-display');
+        const highscoreDisplay = document.getElementById('highscore-display');
+
+        // Highscore aus LocalStorage laden
+        let highscore = parseFloat(localStorage.getItem('flight_runner_highscore') || '0');
+        highscoreDisplay.textContent = `${highscore.toFixed(1)} m`;
+
+        // Basis-Konfiguration
+        const BASE_SPEED_BLOCKS_PER_SEC = 10.386;
+        
+        // Speed Multiplikatoren & Schwellenwerte
+        const SPEED_MILESTONES = [
+            { distance: 0, mult: 0.807, name: '0.807x', color: '#38bdf8' },
+            { distance: 100, mult: 1.000, name: '1.000x', color: '#22c55e' },
+            { distance: 250, mult: 1.243, name: '1.243x', color: '#eab308' },
+            { distance: 500, mult: 1.502, name: '1.502x', color: '#ec4899' },
+            { distance: 1000, mult: 1.857, name: '1.857x', color: '#ef4444' }
+        ];
+
+        let currentSpeedMult = SPEED_MILESTONES[0].mult;
+
+        // Level-Daten (Prozedural)
+        const LEVEL_DATA = {
+            heightBlocks: 10,
+            objects: []
+        };
+
+        // Prozeduraler Generator Zustand
+        let generatedGridX = 0;
+        let corridorTopY = 3; // Höhe der Decke (0 - 6)
+        let corridorDir = 1;  // 1 = nach unten geneigt, -1 = nach oben geneigt
+        const CORRIDOR_GAP = 3.5; // Korridor-Breite in Blöcken
+        let spawnedPortals = new Set();
+
+        function resetLevelGeneration() {
+            LEVEL_DATA.objects = [];
+            generatedGridX = 0;
+            corridorTopY = 3;
+            corridorDir = 1;
+            spawnedPortals.clear();
+            
+            // Startbereich sicher generieren
+            generateLevelUpTo(80);
+        }
+
+        function generateLevelUpTo(targetGridX) {
+            while (generatedGridX < targetGridX) {
+                generatedGridX++;
+
+                // 100% Chance Richtungswechsel bei Decke/Boden, sonst 25% Chance
+                if (corridorDir === -1 && corridorTopY <= 0) {
+                    corridorDir = 1; // Decke erreicht -> MUSS sinken
+                } else if (corridorDir === 1 && corridorTopY >= (LEVEL_DATA.heightBlocks - CORRIDOR_GAP - 1)) {
+                    corridorDir = -1; // Boden erreicht -> MUSS steigen
+                } else {
+                    // 25% Chance, die Richtung im freien Raum zu ändern
+                    if (Math.random() < 0.25) {
+                        corridorDir *= -1;
+                    }
+                }
+
+                // Neue Decken-Position berechnen
+                corridorTopY += corridorDir * 0.5;
+                corridorTopY = Math.max(0, Math.min(LEVEL_DATA.heightBlocks - CORRIDOR_GAP - 0.5, corridorTopY));
+
+                const topYFloor = Math.floor(corridorTopY);
+                const bottomYFloor = Math.floor(corridorTopY + CORRIDOR_GAP);
+
+                // Decken-Schräge
+                LEVEL_DATA.objects.push({
+                    gridX: generatedGridX,
+                    gridY: topYFloor,
+                    type: "slope",
+                    rotation: corridorDir === 1 ? 90 : 270
+                });
+
+                // Decke ausfüllen
+                for (let y = 0; y < topYFloor; y++) {
+                    LEVEL_DATA.objects.push({
+                        gridX: generatedGridX,
+                        gridY: y,
+                        type: "block"
+                    });
+                }
+
+                // Boden-Schräge
+                LEVEL_DATA.objects.push({
+                    gridX: generatedGridX,
+                    gridY: bottomYFloor,
+                    type: "slope",
+                    rotation: corridorDir === 1 ? 180 : 0
+                });
+
+                // Boden ausfüllen
+                for (let y = bottomYFloor + 1; y < LEVEL_DATA.heightBlocks; y++) {
+                    LEVEL_DATA.objects.push({
+                        gridX: generatedGridX,
+                        gridY: y,
+                        type: "block"
+                    });
+                }
+
+                // Speed Portale an bestimmten Meter-Marken platzieren
+                SPEED_MILESTONES.forEach(m => {
+                    if (m.distance > 0 && generatedGridX === m.distance && !spawnedPortals.has(m.distance)) {
+                        spawnedPortals.add(m.distance);
+                        LEVEL_DATA.objects.push({
+                            gridX: generatedGridX,
+                            gridY: topYFloor + 1,
+                            type: "speed_portal",
+                            milestone: m
+                        });
+                    }
+                });
+
+                // Kleine Hindernisse (Spikes) gelegentlich platzieren
+                if (generatedGridX > 15 && Math.random() < 0.12) {
+                    const isCeilingSpike = Math.random() < 0.5;
+                    const spikeY = isCeilingSpike ? topYFloor + 1 : bottomYFloor - 1;
+                    const rot = isCeilingSpike ? 180 : 0;
+
+                    LEVEL_DATA.objects.push({
+                        gridX: generatedGridX,
+                        gridY: spikeY,
+                        type: "small_spike",
+                        rotation: rot
+                    });
+                }
+            }
+        }
+
+        // Raster-Konfiguration
+        const PLAYABLE_BLOCKS_HIGH = LEVEL_DATA.heightBlocks;
+        const MARGIN_BLOCKS = 0.5; 
+        const TOTAL_BLOCKS_HIGH = PLAYABLE_BLOCKS_HIGH + (MARGIN_BLOCKS * 2);
+
+        let BLOCK_SIZE = window.innerHeight / TOTAL_BLOCKS_HIGH;
+        let BOUNDARY_PADDING = BLOCK_SIZE * MARGIN_BLOCKS;
+
+        // Flugphysik-Konfiguration
+        const ANGLE_UP_DEG = 45.1;
+        const ANGLE_DOWN_DEG = 44.9;
+        const ANGLE_UP_RAD = ANGLE_UP_DEG * (Math.PI / 180);
+        const ANGLE_DOWN_RAD = ANGLE_DOWN_DEG * (Math.PI / 180);
+
+        // Hitbox-Größen in Blöcken
+        const PLAYER_HITBOX_BLOCKS = 0.17;
+        const SPIKE_HITBOX_W_BLOCKS = 0.2;
+        const SPIKE_HITBOX_H_BLOCKS = 0.4;
+        const SMALL_SPIKE_HITBOX_W_BLOCKS = 0.2;
+        const SMALL_SPIKE_HITBOX_H_BLOCKS = 0.2;
+
+        // Spieler-Objekt
+        const player = {
+            x: 0,
+            y: 0,
+            blocksPerSecond: BASE_SPEED_BLOCKS_PER_SEC * currentSpeedMult,
+            speed: BASE_SPEED_BLOCKS_PER_SEC * currentSpeedMult * BLOCK_SIZE,
+            radius: BLOCK_SIZE * 0.35,
+            currentAngle: -ANGLE_DOWN_RAD,
+            trail: [],
+            alive: true,
+            respawnTimer: 0,
+            isSlidingOnSlope: false,
+            slideAngleRad: 0
+        };
+
+        let particles = [];
+        let cameraX = 0;
+        let isHolding = false;
+
+        function updatePlayerSpeed() {
+            player.blocksPerSecond = BASE_SPEED_BLOCKS_PER_SEC * currentSpeedMult;
+            player.speed = player.blocksPerSecond * BLOCK_SIZE;
+            speedBadge.textContent = `x${currentSpeedMult.toFixed(3)} Speed`;
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            BLOCK_SIZE = canvas.height / TOTAL_BLOCKS_HIGH;
+            BOUNDARY_PADDING = BLOCK_SIZE * MARGIN_BLOCKS;
+
+            if (player) {
+                updatePlayerSpeed();
+                player.radius = BLOCK_SIZE * 0.35;
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- STEUERUNG ---
+
+        function startHold(e) {
+            if (e.type === 'keydown' && e.code !== 'Space') return;
+            if (e.type === 'keydown' && e.repeat) return;
+            isHolding = true;
+        }
+
+        function endHold(e) {
+            if (e.type === 'keyup' && e.code !== 'Space') return;
+            isHolding = false;
+        }
+
+        window.addEventListener('keydown', startHold);
+        window.addEventListener('keyup', endHold);
+        window.addEventListener('mousedown', startHold);
+        window.addEventListener('mouseup', endHold);
+        window.addEventListener('touchstart', (e) => { startHold(e); e.preventDefault(); }, { passive: false });
+        window.addEventListener('touchend', (e) => { endHold(e); e.preventDefault(); }, { passive: false });
+
+        function resetPlayerPosition() {
+            currentSpeedMult = SPEED_MILESTONES[0].mult;
+            resetLevelGeneration();
+
+            player.x = 0;
+            player.y = canvas.height / 2;
+            player.currentAngle = -ANGLE_DOWN_RAD;
+            player.trail = [];
+            player.alive = true;
+            player.respawnTimer = 0;
+            player.isSlidingOnSlope = false;
+            particles = [];
+            isHolding = false;
+
+            updatePlayerSpeed();
+
+            statusBadge.textContent = `Sinken (-44.9°)`;
+            statusBadge.className = 'active-state state-down';
+        }
+
+        // Start initialisieren
+        resizeCanvas();
+        resetPlayerPosition();
+
+        // --- GEOMETRIE & KOLLISIONEN ---
+
+        function getPlayerHitbox() {
+            const size = PLAYER_HITBOX_BLOCKS * BLOCK_SIZE;
+            return {
+                x: player.x - size / 2,
+                y: player.y - size / 2,
+                width: size,
+                height: size
+            };
+        }
+
+        function getRotatedBoxPolygon(centerX, centerY, width, height, angleDeg) {
+            const rad = angleDeg * (Math.PI / 180);
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+
+            const hw = width / 2;
+            const hh = height / 2;
+
+            const corners = [
+                { x: -hw, y: -hh },
+                { x:  hw, y: -hh },
+                { x:  hw, y:  hh },
+                { x: -hw, y:  hh }
+            ];
+
+            return corners.map(pt => ({
+                x: centerX + (pt.x * cos - pt.y * sin),
+                y: centerY + (pt.x * sin + pt.y * cos)
+            }));
+        }
+
+        function getSlopePolygon(gridX, gridY, rotationDeg) {
+            const playableTop = BOUNDARY_PADDING;
+            const x1 = gridX * BLOCK_SIZE;
+            const y1 = playableTop + (gridY * BLOCK_SIZE);
+            const x2 = x1 + BLOCK_SIZE;
+            const y2 = y1 + BLOCK_SIZE;
+
+            const rot = (rotationDeg || 0) % 360;
+
+            if (rot === 0) {
+                return [{ x: x1, y: y2 }, { x: x2, y: y2 }, { x: x2, y: y1 }];
+            } else if (rot === 90) {
+                return [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }];
+            } else if (rot === 180) {
+                return [{ x: x1, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 }];
+            } else { // 270°
+                return [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }];
+            }
+        }
+
+        function polygonsIntersect(polyA, polyB) {
+            const polys = [polyA, polyB];
+            for (let i = 0; i < polys.length; i++) {
+                const poly = polys[i];
+                for (let j = 0; j < poly.length; j++) {
+                    const k = (j + 1) % poly.length;
+                    const edge = { x: poly[k].x - poly[j].x, y: poly[k].y - poly[j].y };
+                    const normal = { x: -edge.y, y: edge.x };
+
+                    let minA = Infinity, maxA = -Infinity;
+                    for (const pt of polyA) {
+                        const projected = pt.x * normal.x + pt.y * normal.y;
+                        if (projected < minA) minA = projected;
+                        if (projected > maxA) maxA = projected;
+                    }
+
+                    let minB = Infinity, maxB = -Infinity;
+                    for (const pt of polyB) {
+                        const projected = pt.x * normal.x + pt.y * normal.y;
+                        if (projected < minB) minB = projected;
+                        if (projected > maxB) maxB = projected;
+                    }
+
+                    if (maxA < minB || maxB < minA) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function triggerSpeedPortalEffect(color) {
+            for (let i = 0; i < 25; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = (Math.random() * 150 + 50);
+                particles.push({
+                    x: player.x,
+                    y: player.y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: Math.random() * 4 + 2,
+                    color: color,
+                    life: 0.6
+                });
+            }
+        }
+
+        function checkCollisions() {
+            if (!player.alive) return;
+
+            const pHitbox = getPlayerHitbox();
+            const playerPoly = [
+                { x: pHitbox.x, y: pHitbox.y },
+                { x: pHitbox.x + pHitbox.width, y: pHitbox.y },
+                { x: pHitbox.x + pHitbox.width, y: pHitbox.y + pHitbox.height },
+                { x: pHitbox.x, y: pHitbox.y + pHitbox.height }
+            ];
+
+            const playableTop = BOUNDARY_PADDING;
+            player.isSlidingOnSlope = false;
+
+            for (const obj of LEVEL_DATA.objects) {
+                const objWorldX = obj.gridX * BLOCK_SIZE;
+                const objWorldY = playableTop + (obj.gridY * BLOCK_SIZE);
+
+                if (Math.abs(player.x - (objWorldX + BLOCK_SIZE / 2)) > BLOCK_SIZE * 2) continue;
+
+                if (obj.type === 'speed_portal') {
+                    if (!obj.activated && player.x >= objWorldX) {
+                        obj.activated = true;
+                        currentSpeedMult = obj.milestone.mult;
+                        updatePlayerSpeed();
+                        triggerSpeedPortalEffect(obj.milestone.color);
+                    }
+                }
+                else if (obj.type === 'block') {
+                    const blockPoly = [
+                        { x: objWorldX, y: objWorldY },
+                        { x: objWorldX + BLOCK_SIZE, y: objWorldY },
+                        { x: objWorldX + BLOCK_SIZE, y: objWorldY + BLOCK_SIZE },
+                        { x: objWorldX, y: objWorldY + BLOCK_SIZE }
+                    ];
+
+                    if (polygonsIntersect(playerPoly, blockPoly)) {
+                        killPlayer();
+                        return;
+                    }
+                } 
+                else if (obj.type === 'spike' || obj.type === 'small_spike') {
+                    const centerX = objWorldX + BLOCK_SIZE / 2;
+                    const centerY = objWorldY + BLOCK_SIZE / 2;
+                    const w = (obj.type === 'spike' ? SPIKE_HITBOX_W_BLOCKS : SMALL_SPIKE_HITBOX_W_BLOCKS) * BLOCK_SIZE;
+                    const h = (obj.type === 'spike' ? SPIKE_HITBOX_H_BLOCKS : SMALL_SPIKE_HITBOX_H_BLOCKS) * BLOCK_SIZE;
+
+                    const spikePoly = getRotatedBoxPolygon(centerX, centerY, w, h, obj.rotation || 0);
+
+                    if (polygonsIntersect(playerPoly, spikePoly)) {
+                        killPlayer();
+                        return;
+                    }
+                }
+                else if (obj.type === 'slope') {
+                    const slopePoly = getSlopePolygon(obj.gridX, obj.gridY, obj.rotation);
+
+                    if (polygonsIntersect(playerPoly, slopePoly)) {
+                        const rot = (obj.rotation || 0) % 360;
+
+                        if (rot === 0 && isHolding) {
+                            player.isSlidingOnSlope = true;
+                            player.slideAngleRad = -Math.PI / 4;
+                        } else if (rot === 270 && !isHolding) {
+                            player.isSlidingOnSlope = true;
+                            player.slideAngleRad = Math.PI / 4;
+                        } else {
+                            killPlayer();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        function killPlayer() {
+            player.alive = false;
+            player.respawnTimer = 1.0;
+            statusBadge.textContent = 'ZERSTÖRT!';
+            statusBadge.className = 'active-state state-dead';
+
+            for (let i = 0; i < 35; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = (Math.random() * 200 + 50);
+                particles.push({
+                    x: player.x,
+                    y: player.y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: Math.random() * 5 + 2,
+                    color: Math.random() > 0.5 ? '#ef4444' : '#38bdf8',
+                    life: 1.0
+                });
+            }
+        }
+
+        // --- UPDATE ---
+
+        let lastTime = performance.now();
+
+        function update(deltaTime) {
+            if (player.alive) {
+                // Dynamisch voraus-generieren
+                const currentGridX = Math.floor(player.x / BLOCK_SIZE);
+                generateLevelUpTo(currentGridX + 60);
+
+                // Inaktive alte Objekte hinter der Kamera entfernen (Performance)
+                if (LEVEL_DATA.objects.length > 500) {
+                    const minKeepX = currentGridX - 30;
+                    LEVEL_DATA.objects = LEVEL_DATA.objects.filter(obj => obj.gridX >= minKeepX);
+                }
+
+                const ceilingY = BOUNDARY_PADDING + player.radius;
+                const floorY = canvas.height - BOUNDARY_PADDING - player.radius;
+
+                let currentRad = isHolding ? -ANGLE_UP_RAD : ANGLE_DOWN_RAD;
+                let isTouchingWall = false;
+
+                if (player.isSlidingOnSlope) {
+                    currentRad = player.slideAngleRad;
+                    isTouchingWall = true;
+                }
+
+                let dx = Math.cos(currentRad) * player.speed * deltaTime;
+                let dy = Math.sin(currentRad) * player.speed * deltaTime;
+
+                let nextY = player.y + dy;
+
+                if (nextY <= ceilingY) {
+                    player.y = ceilingY;
+                    dy = 0;
+                    currentRad = 0; 
+                    isTouchingWall = true;
+                } else if (nextY >= floorY) {
+                    player.y = floorY;
+                    dy = 0;
+                    currentRad = 0;
+                    isTouchingWall = true;
+                } else {
+                    player.y = nextY;
+                }
+
+                player.x += dx;
+                player.currentAngle += (currentRad - player.currentAngle) * 0.25;
+
+                player.trail.push({ x: player.x, y: player.y });
+                if (player.trail.length > 150) {
+                    player.trail.shift();
+                }
+
+                checkCollisions();
+
+                cameraX = Math.max(0, player.x - canvas.width * 0.25);
+
+                // UI Status-Update
+                if (isTouchingWall && player.alive) {
+                    statusBadge.textContent = `Gleiten`;
+                    statusBadge.className = 'active-state state-touching';
+                } else if (isHolding && player.alive) {
+                    statusBadge.textContent = `Steigen (+${ANGLE_UP_DEG.toFixed(1)}°)`;
+                    statusBadge.className = 'active-state state-up';
+                } else if (player.alive) {
+                    statusBadge.textContent = `Sinken (-${ANGLE_DOWN_DEG.toFixed(1)}°)`;
+                    statusBadge.className = 'active-state state-down';
+                }
+
+                const distanceMeters = (player.x / BLOCK_SIZE);
+                distanceDisplay.textContent = `${distanceMeters.toFixed(1)} m`;
+
+                // Highscore prüfen und speichern
+                if (distanceMeters > highscore) {
+                    highscore = distanceMeters;
+                    localStorage.setItem('flight_runner_highscore', highscore.toString());
+                    highscoreDisplay.textContent = `${highscore.toFixed(1)} m`;
+                }
+            } else {
+                player.respawnTimer -= deltaTime;
+                if (player.respawnTimer <= 0) {
+                    resetPlayerPosition();
+                }
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * deltaTime;
+                p.y += p.vy * deltaTime;
+                p.life -= deltaTime * 1.5;
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- DRAWING ---
+
+        function drawBoundaries() {
+            // Decke
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+            ctx.fillRect(0, 0, canvas.width, BOUNDARY_PADDING);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, BOUNDARY_PADDING);
+            ctx.lineTo(canvas.width, BOUNDARY_PADDING);
+            ctx.stroke();
+
+            // Boden
+            const floorTop = canvas.height - BOUNDARY_PADDING;
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
+            ctx.fillRect(0, floorTop, canvas.width, BOUNDARY_PADDING);
+            ctx.strokeStyle = '#22c55e';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, floorTop);
+            ctx.lineTo(canvas.width, floorTop);
+            ctx.stroke();
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = '#0b0f19';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const gridSize = BLOCK_SIZE;
+            const offsetX = cameraX % gridSize;
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 1;
+
+            for (let x = -offsetX; x < canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+
+            for (let y = BOUNDARY_PADDING; y <= canvas.height - BOUNDARY_PADDING + 1; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+        }
+
+        function drawLevelObjects() {
+            const playableTop = BOUNDARY_PADDING;
+
+            for (const obj of LEVEL_DATA.objects) {
+                const screenX = (obj.gridX * BLOCK_SIZE) - cameraX;
+                const screenY = playableTop + (obj.gridY * BLOCK_SIZE);
+
+                if (screenX + BLOCK_SIZE < 0 || screenX > canvas.width) continue;
+
+                if (obj.type === 'speed_portal') {
+                    ctx.save();
+                    const portalX = screenX + BLOCK_SIZE / 2;
+                    const portalY = screenY + (CORRIDOR_GAP * BLOCK_SIZE) / 2 - BLOCK_SIZE;
+                    const height = BLOCK_SIZE * 2.5;
+
+                    ctx.shadowColor = obj.milestone.color;
+                    ctx.shadowBlur = 15;
+                    ctx.strokeStyle = obj.milestone.color;
+                    ctx.lineWidth = 4;
+
+                    // Portal Ellipse
+                    ctx.beginPath();
+                    ctx.ellipse(portalX, portalY, BLOCK_SIZE * 0.3, height / 2, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    ctx.fillStyle = obj.milestone.color;
+                    ctx.font = `bold ${Math.max(12, BLOCK_SIZE * 0.35)}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(obj.milestone.name, portalX, portalY - height / 2 - 8);
+
+                    ctx.restore();
+                }
+                else if (obj.type === 'block') {
+                    ctx.fillStyle = '#1e293b';
+                    ctx.fillRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE);
+                    
+                    ctx.strokeStyle = '#38bdf8';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(screenX + 1, screenY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
+
+                    ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+                    ctx.fillRect(screenX + 4, screenY + 4, BLOCK_SIZE - 8, BLOCK_SIZE - 8);
+                } 
+                else if (obj.type === 'spike') {
+                    ctx.save();
+                    const centerX = screenX + BLOCK_SIZE / 2;
+                    const centerY = screenY + BLOCK_SIZE / 2;
+
+                    ctx.translate(centerX, centerY);
+                    ctx.rotate((obj.rotation || 0) * (Math.PI / 180));
+
+                    ctx.fillStyle = '#ef4444';
+                    ctx.strokeStyle = '#f87171';
+                    ctx.lineWidth = 2;
+
+                    ctx.beginPath();
+                    ctx.moveTo(0, -BLOCK_SIZE / 2 + 2);
+                    ctx.lineTo(BLOCK_SIZE / 2 - 2, BLOCK_SIZE / 2 - 2);
+                    ctx.lineTo(-BLOCK_SIZE / 2 + 2, BLOCK_SIZE / 2 - 2);
+                    ctx.closePath();
+
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.restore();
+                }
+                else if (obj.type === 'small_spike') {
+                    ctx.save();
+                    const centerX = screenX + BLOCK_SIZE / 2;
+                    const centerY = screenY + BLOCK_SIZE / 2;
+
+                    ctx.translate(centerX, centerY);
+                    ctx.rotate((obj.rotation || 0) * (Math.PI / 180));
+
+                    ctx.fillStyle = '#f97316';
+                    ctx.strokeStyle = '#fb923c';
+                    ctx.lineWidth = 2;
+
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(BLOCK_SIZE / 2 - 4, BLOCK_SIZE / 2 - 2);
+                    ctx.lineTo(-BLOCK_SIZE / 2 + 4, BLOCK_SIZE / 2 - 2);
+                    ctx.closePath();
+
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.restore();
+                }
+                else if (obj.type === 'slope') {
+                    const poly = getSlopePolygon(obj.gridX, obj.gridY, obj.rotation);
+                    const screenPoly = poly.map(pt => ({ x: pt.x - cameraX, y: pt.y }));
+
+                    ctx.fillStyle = '#334155';
+                    ctx.strokeStyle = '#38bdf8';
+                    ctx.lineWidth = 2;
+
+                    ctx.beginPath();
+                    ctx.moveTo(screenPoly[0].x, screenPoly[0].y);
+                    ctx.lineTo(screenPoly[1].x, screenPoly[1].y);
+                    ctx.lineTo(screenPoly[2].x, screenPoly[2].y);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function drawTrail() {
+            if (player.trail.length < 2 || !player.alive) return;
+
+            ctx.save();
+            ctx.beginPath();
+            
+            for (let i = 0; i < player.trail.length; i++) {
+                const point = player.trail[i];
+                const screenX = point.x - cameraX;
+                const screenY = point.y;
+
+                if (i === 0) {
+                    ctx.moveTo(screenX, screenY);
+                } else {
+                    ctx.lineTo(screenX, screenY);
+                }
+            }
+
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+            gradient.addColorStop(0, 'rgba(56, 189, 248, 0)');
+            gradient.addColorStop(1, 'rgba(56, 189, 248, 0.8)');
+
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = Math.max(2, BLOCK_SIZE * 0.1);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawPlayer() {
+            if (!player.alive) return;
+
+            const screenX = player.x - cameraX;
+            const screenY = player.y;
+
+            ctx.save();
+            ctx.translate(screenX, screenY);
+            ctx.rotate(player.currentAngle);
+
+            ctx.shadowColor = '#38bdf8';
+            ctx.shadowBlur = 15;
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath();
+            ctx.moveTo(player.radius * 1.5, 0);
+            ctx.lineTo(-player.radius, -player.radius * 0.8);
+            ctx.lineTo(-player.radius * 0.5, 0);
+            ctx.lineTo(-player.radius, player.radius * 0.8);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#0284c7';
+            ctx.beginPath();
+            ctx.moveTo(player.radius * 0.5, 0);
+            ctx.lineTo(-player.radius * 0.5, -player.radius * 0.3);
+            ctx.lineTo(-player.radius * 0.5, player.radius * 0.3);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawParticles() {
+            for (const p of particles) {
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x - cameraX, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function gameLoop(currentTime) {
+            const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.1);
+            lastTime = currentTime;
+
+            update(deltaTime);
+
+            drawBackground();
+            drawBoundaries();
+            drawLevelObjects();
+            drawTrail();
+            drawPlayer();
+            drawParticles();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
+
