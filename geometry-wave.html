@@ -44,6 +44,9 @@
             color: #94a3b8;
             font-weight: 600;
             letter-spacing: 0.5px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
 
         #highscore-badge span {
@@ -51,6 +54,17 @@
             font-family: monospace;
             font-weight: bold;
         }
+
+        .gravity-status {
+            font-size: 0.8rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .grav-normal { color: #38bdf8; }
+        .grav-inverted { color: #eab308; }
 
         /* Meteranzeige oben Mitte */
         #distance-hud {
@@ -67,7 +81,6 @@
             letter-spacing: 1px;
         }
 
-        /* Kleine Einheiten-Anzeige unter den Metern */
         #distance-unit {
             font-size: 1.1rem;
             color: #38bdf8;
@@ -78,9 +91,10 @@
 </head>
 <body>
 
-    <!-- Highscore oben links -->
+    <!-- Highscore & Schwerkraft Status oben links -->
     <div id="highscore-badge">
-        Highscore: <span id="highscore-display">0</span> Meter
+        <div>Highscore: <span id="highscore-display">0</span> Meter</div>
+        <div id="gravity-display" class="gravity-status grav-normal">GRAVITY: NORMAL</div>
     </div>
 
     <!-- Große Meteranzeige oben Mitte -->
@@ -96,6 +110,7 @@
 
         const distanceDisplay = document.getElementById('distance-display');
         const highscoreDisplay = document.getElementById('highscore-display');
+        const gravityDisplay = document.getElementById('gravity-display');
 
         // Spielfeld-Spezifikation (11 spielbare Blöcke hoch)
         const PLAYABLE_BLOCKS_HIGH = 11;
@@ -141,7 +156,8 @@
             alive: true,
             respawnTimer: 0,
             isSlidingOnSlope: false,
-            slideAngleRad: 0
+            slideAngleRad: 0,
+            gravityInverted: false
         };
 
         let particles = [];
@@ -151,9 +167,11 @@
         // Level-Generierung Parameter
         let levelObjects = [];
         let speedPortals = [];
+        let gravityPortals = [];
         let generatedGridX = 0;
         let corridorDirection = -1; // -1 = Sinken, 1 = Steigen
         let currentY = 4;           // Y-Position der Korridordecke
+        let currentPortalGravityState = false; // Verfolgt den Schwerkraftstatus bei der Generierung
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
@@ -170,14 +188,16 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // --- PROZEDURALE GENERIERUNG ---
+        // --- PROZEDURALE GENERIERUNG MIT GRAVITY PORTALS ---
 
         function initGenerator() {
             levelObjects = [];
             speedPortals = [];
+            gravityPortals = [];
             generatedGridX = 0;
             corridorDirection = -1;
             currentY = 4;
+            currentPortalGravityState = false;
 
             for (let i = 0; i < SPEED_STAGES.length; i++) {
                 speedPortals.push({
@@ -216,6 +236,16 @@
 
                 if (changeDirection) {
                     corridorDirection *= -1;
+
+                    // 5% Chance bei Richtungswechsel auf ein Schwerkraft-Portal
+                    if (Math.random() < 0.05) {
+                        currentPortalGravityState = !currentPortalGravityState;
+                        gravityPortals.push({
+                            gridX: gx + 1,
+                            inverted: currentPortalGravityState,
+                            passed: false
+                        });
+                    }
                 }
 
                 if (currentY <= minY && corridorDirection === 1) {
@@ -288,10 +318,22 @@
             player.alive = true;
             player.respawnTimer = 0;
             player.isSlidingOnSlope = false;
+            player.gravityInverted = false;
             particles = [];
             isHolding = false;
 
+            updateGravityHUD();
             initGenerator();
+        }
+
+        function updateGravityHUD() {
+            if (player.gravityInverted) {
+                gravityDisplay.textContent = 'GRAVITY: INVERTED';
+                gravityDisplay.className = 'gravity-status grav-inverted';
+            } else {
+                gravityDisplay.textContent = 'GRAVITY: NORMAL';
+                gravityDisplay.className = 'gravity-status grav-normal';
+            }
         }
 
         // --- GEOMETRIE & KOLLISIONSLOGIK ---
@@ -372,6 +414,9 @@
             player.isSlidingOnSlope = false;
 
             const playerGridX = Math.floor(player.x / BLOCK_SIZE);
+
+            // Logik für Aufwärtsbewegung (ob Steigen oder Sinken hängt vom Schwerkraftzustand ab)
+            const isGoingUp = player.gravityInverted ? !isHolding : isHolding;
             
             for (let i = 0; i < levelObjects.length; i++) {
                 const obj = levelObjects[i];
@@ -398,10 +443,10 @@
                     if (polygonsIntersect(playerPoly, slopePoly)) {
                         const rot = (obj.rotation || 0) % 360;
 
-                        if ((rot === 0 || rot === 270) && isHolding) {
+                        if ((rot === 0 || rot === 270) && isGoingUp) {
                             player.isSlidingOnSlope = true;
                             player.slideAngleRad = -Math.PI / 4;
-                        } else if ((rot === 180 || rot === 90) && !isHolding) {
+                        } else if ((rot === 180 || rot === 90) && !isGoingUp) {
                             player.isSlidingOnSlope = true;
                             player.slideAngleRad = Math.PI / 4;
                         } else {
@@ -416,6 +461,7 @@
         function checkPortals() {
             const playerMeters = Math.floor(player.x / BLOCK_SIZE);
 
+            // Speed Portale prüfen
             for (const portal of speedPortals) {
                 if (!portal.passed && playerMeters >= portal.gridX) {
                     portal.passed = true;
@@ -431,6 +477,29 @@
                             size: Math.random() * 4 + 2,
                             color: portal.stage.color,
                             life: 0.8
+                        });
+                    }
+                }
+            }
+
+            // Gravity Portale prüfen
+            for (const portal of gravityPortals) {
+                if (!portal.passed && playerMeters >= portal.gridX) {
+                    portal.passed = true;
+                    player.gravityInverted = portal.inverted;
+                    updateGravityHUD();
+
+                    const portalColor = portal.inverted ? '#eab308' : '#38bdf8';
+
+                    for (let i = 0; i < 25; i++) {
+                        particles.push({
+                            x: player.x,
+                            y: player.y,
+                            vx: (Math.random() - 0.5) * 180,
+                            vy: (Math.random() - 0.5) * 180,
+                            size: Math.random() * 5 + 2,
+                            color: portalColor,
+                            life: 0.9
                         });
                     }
                 }
@@ -472,7 +541,13 @@
                 const ceilingY = BOUNDARY_PADDING + player.radius;
                 const floorY = canvas.height - BOUNDARY_PADDING - player.radius;
 
-                let currentRad = isHolding ? -ANGLE_UP_RAD : ANGLE_DOWN_RAD;
+                // Schwerkraft-Logik: Bei Inverted steigt man ohne Hold und sinkt mit Hold
+                let goingUp = isHolding;
+                if (player.gravityInverted) {
+                    goingUp = !isHolding;
+                }
+
+                let currentRad = goingUp ? -ANGLE_UP_RAD : ANGLE_DOWN_RAD;
 
                 if (player.isSlidingOnSlope) {
                     currentRad = player.slideAngleRad;
@@ -623,6 +698,7 @@
                 }
             }
 
+            // Speed Portale zeichnen
             for (const portal of speedPortals) {
                 const screenX = (portal.gridX * BLOCK_SIZE) - cameraX;
                 if (screenX > -BLOCK_SIZE && screenX < canvas.width) {
@@ -639,6 +715,31 @@
                     ctx.fillStyle = portal.stage.color;
                     ctx.font = 'bold 12px monospace';
                     ctx.fillText(portal.stage.label, screenX - 15, BOUNDARY_PADDING + 20);
+
+                    ctx.restore();
+                }
+            }
+
+            // Gravity Portale zeichnen
+            for (const portal of gravityPortals) {
+                const screenX = (portal.gridX * BLOCK_SIZE) - cameraX;
+                if (screenX > -BLOCK_SIZE && screenX < canvas.width) {
+                    const portalColor = portal.inverted ? '#eab308' : '#38bdf8';
+                    const label = portal.inverted ? 'GRAV 🠗' : 'GRAV 🠕';
+
+                    ctx.save();
+                    ctx.strokeStyle = portalColor;
+                    ctx.lineWidth = 4;
+                    ctx.shadowColor = portalColor;
+                    ctx.shadowBlur = 14;
+
+                    ctx.beginPath();
+                    ctx.ellipse(screenX + BLOCK_SIZE / 2, canvas.height / 2, BLOCK_SIZE * 0.35, BLOCK_SIZE * 3.5, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    ctx.fillStyle = portalColor;
+                    ctx.font = 'bold 11px monospace';
+                    ctx.fillText(label, screenX - 18, BOUNDARY_PADDING + 38);
 
                     ctx.restore();
                 }
@@ -663,9 +764,10 @@
                 }
             }
 
+            const trailColor = player.gravityInverted ? 'rgba(234, 179, 8, ' : 'rgba(56, 189, 248, ';
             const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
-            gradient.addColorStop(0, 'rgba(56, 189, 248, 0)');
-            gradient.addColorStop(1, 'rgba(56, 189, 248, 0.8)');
+            gradient.addColorStop(0, trailColor + '0)');
+            gradient.addColorStop(1, trailColor + '0.8)');
 
             ctx.strokeStyle = gradient;
             ctx.lineWidth = Math.max(2, BLOCK_SIZE * 0.1);
@@ -685,7 +787,8 @@
             ctx.translate(screenX, screenY);
             ctx.rotate(player.currentAngle);
 
-            ctx.shadowColor = '#38bdf8';
+            const glowColor = player.gravityInverted ? '#eab308' : '#38bdf8';
+            ctx.shadowColor = glowColor;
             ctx.shadowBlur = 15;
 
             ctx.fillStyle = '#f8fafc';
@@ -697,7 +800,7 @@
             ctx.closePath();
             ctx.fill();
 
-            ctx.fillStyle = '#0284c7';
+            ctx.fillStyle = player.gravityInverted ? '#ca8a04' : '#0284c7';
             ctx.beginPath();
             ctx.moveTo(player.radius * 0.5, 0);
             ctx.lineTo(-player.radius * 0.5, -player.radius * 0.3);
