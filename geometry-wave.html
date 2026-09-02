@@ -258,41 +258,46 @@
             }
         }
 
-        // --- STEUERUNG ---
+// --- STEUERUNG ---
 
-        function startHold(e) {
-            if (e.type === 'keydown' && e.code !== 'Space') return;
-            if (e.type === 'keydown' && e.repeat) return;
-            isHolding = true;
-        }
+const CONTROL_KEYS = ['Space', 'ArrowUp', 'KeyW'];
 
-        function endHold(e) {
-            if (e.type === 'keyup' && e.code !== 'Space') return;
-            isHolding = false;
-        }
+function startHold(e) {
+    if (e.type === 'keydown') {
+        if (!CONTROL_KEYS.includes(e.code)) return;
+        if (e.repeat) return;
 
-        window.addEventListener('keydown', startHold);
-        window.addEventListener('keyup', endHold);
-        window.addEventListener('mousedown', startHold);
-        window.addEventListener('mouseup', endHold);
-        window.addEventListener('touchstart', (e) => { startHold(e); e.preventDefault(); }, { passive: false });
-        window.addEventListener('touchend', (e) => { endHold(e); e.preventDefault(); }, { passive: false });
+        // Verhindert z. B. Scrollen mit Pfeil hoch / Leertaste
+        e.preventDefault();
+    }
 
-        function resetPlayerPosition() {
-            player.x = 0;
-            player.y = canvas.height / 2;
-            player.speedMultiplier = SPEED_STAGES[0].multiplier;
-            player.speed = BASE_BLOCKS_PER_SECOND * player.speedMultiplier * BLOCK_SIZE;
-            player.currentAngle = -ANGLE_DOWN_RAD;
-            player.trail = [];
-            player.alive = true;
-            player.respawnTimer = 0;
-            player.isSlidingOnSlope = false;
-            particles = [];
-            isHolding = false;
+    isHolding = true;
+}
 
-            initGenerator();
-        }
+function endHold(e) {
+    if (e.type === 'keyup') {
+        if (!CONTROL_KEYS.includes(e.code)) return;
+        e.preventDefault();
+    }
+
+    isHolding = false;
+}
+
+window.addEventListener('keydown', startHold);
+window.addEventListener('keyup', endHold);
+
+window.addEventListener('mousedown', startHold);
+window.addEventListener('mouseup', endHold);
+
+window.addEventListener('touchstart', (e) => {
+    startHold(e);
+    e.preventDefault();
+}, { passive: false });
+
+window.addEventListener('touchend', (e) => {
+    endHold(e);
+    e.preventDefault();
+}, { passive: false });
 
         // --- GEOMETRIE & KOLLISIONSLOGIK ---
 
